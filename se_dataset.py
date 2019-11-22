@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[7]:
+# In[1]:
 
 
 import argparse
@@ -27,12 +27,19 @@ import torch
 from torch.utils import data
 
 
+# In[2]:
+
+
+folder = '/home/sangwon/바탕화면'
+folder += "/dataset"
+
+
 # In[3]:
 
 
 # Reference
 # DATA LOADING - LOAD FILE LISTS
-def load_data_list(folder='/home/sangwon/바탕화면/dataset', setname='train'):
+def load_data_list(folder=folder, setname='train'):
     assert(setname in ['train', 'valid'])
 
     dataset = {}
@@ -125,14 +132,14 @@ class AudioDataset(data.Dataset):
 valid_dataset = AudioDataset(data_type='valid')
 
 
-# In[5]:
-
-
-valid_data_loader = DataLoader(dataset=test_dataset, batch_size=4,
-        collate_fn=test_dataset.collate, shuffle=False, num_workers=4)
-
-
 # In[6]:
+
+
+valid_data_loader = DataLoader(dataset=valid_dataset, batch_size=4,
+        collate_fn=valid_dataset.collate, shuffle=False, num_workers=4)
+
+
+# In[7]:
 
 
 for tdl in iter(valid_data_loader):
