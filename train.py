@@ -29,7 +29,8 @@ from pypesq import pesq
 
 from models.layers.istft import ISTFT
 import train_utils
-import se_dataset import AudioDataset
+import load_dataset
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--model_dir', default='experiments/base_model', help="Directory containing params.json")
