@@ -105,27 +105,27 @@ def main():
             for i, l in enumerate(seq_len):
                 out_audio[i, l:] = 0
 
-	    loss = 0
+            loss = 0
             PESQ = 0
-	    STOI = 0
-	    for i in range(args.batch_size):
-            	librosa.output.write_wav('mixed.wav', train_mixed[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
-            	librosa.output.write_wav('clean.wav', train_clean[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
-            	librosa.output.write_wav('out.wav', out_audio[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
-		out = stft(out_audio[i]).unsqueeze(dim=1)
-		clean = stft(train_clean[i]).unsqueeze(dim=1)
-		loss += torch.nn.MSELoss(out, clean)
-		PESQ += pesq('clean.wav', 'out.wav', 16000)
-		STOI += stoi('clean.wav', 'out.wav', 16000)
-	
-	    loss /= args.batch_size
-	    PESQ /= args.batch_size
-	    STOI /= agrs.batch_size	
+            STOI = 0
+            for i in range(args.batch_size):
+                librosa.output.write_wav('mixed.wav', train_mixed[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
+                librosa.output.write_wav('clean.wav', train_clean[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
+                librosa.output.write_wav('out.wav', out_audio[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
+                out = stft(out_audio[i]).unsqueeze(dim=1)
+                clean = stft(train_clean[i]).unsqueeze(dim=1)
+                loss += torch.nn.MSELoss(out, clean)
+                PESQ += pesq('clean.wav', 'out.wav', 16000)
+                STOI += stoi('clean.wav', 'out.wav', 16000)
+        
+            loss /= args.batch_size
+            PESQ /= args.batch_size
+            STOI /= agrs.batch_size	
             #calculate LOSS
             #loss =  wSDRLoss(train_mixed, train_clean, out_audio)
             #loss = torch.nn.MSELoss(out_audio, train_clean)
            
-	    #gradient optimizer
+	        #gradient optimizer
             optimizer.zero_grad()
 
             #backpropagate LOSS
