@@ -159,24 +159,39 @@ def main():
             test_acc = 0
             test_bar = tqdm(valid_data_loader)
             for input in test_bar:
-                test_mixed, text_clean, seq_len
+                test_mixed, test_clean, seq_len = map(lambda x: x.cuda(), input)
                 logits_real, logits_imag = net(input)
                 logits_real, logits_imag = torch.squeeze(logits_real, 1), torch.squeeze(logits_imag, 1)
                 logits_audio = istft(logits_real, logits_imag, test_mixed.size(1))
                 logits_audio = torch.squeeze(logits_audio, dim=1)
                 for i, l in enumerate(test_seq_len):
                   logits_audio[i, l:] = 0
-                librosa.output.write_wav('test_clean.wav', test_clean[0].cpu().data.numpy()[:seq_len[0].cpu().data.numpy()], 16000)
-                librosa.output.write_wav('test_out.wav', logits_audio[0].cpu().data.numpy()[:seq_len[0].cpu().data.numpy()], 16000)
-
+                teset_loss = 0
+                test_PESQ = 0
+                test_STOI = 0
+                for i in range(args.batch_size):
+                    librosa.output.write_wav('test_mixed.wav', test_mixed[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
+                    librosa.output.write_wav('test_clean.wav', test_clean[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
+                    librosa.output.write_wav('test_out.wav', logits_audio[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
+                    out_acc, fs = sf.read('test_out.wav')
+                    clean_acc, fs = sf.read('test_clean.wav')
+                    out_stft = stft(logits_audio[i]).unsqueeze(dim=1)
+                    clean_stft = stft(test_clean[i]).unsqueeze(dim=1)
+                    test_loss += F.mse_loss(out_stft[1], clean_stft[1],True)
+                    test_PESQ += pesq(clean_acc, out_acc, fs)
+                    test_STOI += stoi(clean_acc, out_acc, fs)
+        
+            test_loss /= args.batch_size
+            test_PESQ /= args.batch_size
+            test_STOI /= args.batch_size	
 
                 #test loss
                 #test_loss = wSDRLoss(test_mixed, test_clean, out_audio)
-                test_loss = torch.nn.MSELoss(out_audio, test_clean)
+                #test_loss = torch.nn.MSELoss(out_audio, test_clean)
 
                 #test accuracy
-                test_pesq = pesq('test_clean.wav', 'test_out.wav', 16000)
-                test_stoi = stoi('test_clean.wav', 'test_out.wav', 16000)
+                #test_pesq = pesq('test_clean.wav', 'test_out.wav', 16000)
+                #test_stoi = stoi('test_clean.wav', 'test_out.wav', 16000)
 
             summary.add_scalar('Test Loss', test_loss.item(), iteration)
             print('[epoch: {}, iteration: {}] test loss : {:.4f} PESQ : {:.4f} STOI : {:.4f}'.format(epoch, iteration, test_loss, test_pesq, test_stoi))
