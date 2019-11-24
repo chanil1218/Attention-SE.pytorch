@@ -30,9 +30,9 @@ from load_dataset import AudioDataset
 from models.unet import Unet
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--model_dir', default='experiments/base_model', help="Directory containing params.json")
+parser.add_argument('--model_dir', default='experiment/SE_model.json', help="Directory containing params.json")
 parser.add_argument('--restore_file', default=None, help="Optional, name of the file in --model_dir containing weights to reload before training")  # 'best' or 'train'
-parser.add_argument('--batch_size', default=32, type=int, help='train batch size')
+parser.add_argument('--batch_size', default=4, type=int, help='train batch size')
 parser.add_argument('--num_epochs', default=100, type=int, help='train epochs number')
 args = parser.parse_args()
 
@@ -53,9 +53,9 @@ def main():
 
     #data loader
     train_dataset = AudioDataset(data_type='train')
-    train_data_loader = DataLoader(dataset=train_dataset, batch_size=4, collate_fn=train_dataset.collate, shuffle=True, num_workers=4)
+    train_data_loader = DataLoader(dataset=train_dataset, batch_size=args.batch_size, collate_fn=train_dataset.collate, shuffle=True, num_workers=4)
     valid_dataset = AudioDataset(data_type='val')
-    valid_data_loader = DataLoader(dataset=valid_dataset, batch_size=4, collate_fn=valid_dataset.collate, shuffle=False, num_workers=4)
+    valid_data_loader = DataLoader(dataset=valid_dataset, batch_size=args.batch_size, collate_fn=valid_dataset.collate, shuffle=False, num_workers=4)
     #model select
     print('Model initializing\n')
     net = Unet(params.model).cuda()
@@ -90,12 +90,18 @@ def main():
     iteration = 0
     for epoch in range(args.num_epochs):
         train_bar = tqdm(train_data_loader)
+        # train_bar = train_data_loader
         for input in train_bar:
             iteration += 1
             #load data
             train_mixed, train_clean, seq_len = map(lambda x: x.cuda(), input)
             mixed = stft(train_mixed).unsqueeze(dim=1)
             real, imag = mixed[..., 0], mixed[..., 1]
+
+            print(train_mixed[0].size())
+            print(train_clean[0].size())
+            print(seq_len[0].size())
+
 
             #feed data
             out_real, out_imag = net(real, imag)
@@ -112,15 +118,17 @@ def main():
                 librosa.output.write_wav('mixed.wav', train_mixed[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
                 librosa.output.write_wav('clean.wav', train_clean[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
                 librosa.output.write_wav('out.wav', out_audio[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
-                out = stft(out_audio[i]).unsqueeze(dim=1)
-                clean = stft(train_clean[i]).unsqueeze(dim=1)
-                loss += torch.nn.MSELoss(out, clean)
-                PESQ += pesq('clean.wav', 'out.wav', 16000)
-                STOI += stoi('clean.wav', 'out.wav', 16000)
+                out_acc, fs = sf.read('out.wav')
+                clean_acc, fs = sf.read('clean.wav')
+                out_stft = stft(out_audio[i]).unsqueeze(dim=1)
+                clean_stft = stft(train_clean[i]).unsqueeze(dim=1)
+                loss += F.mse_loss(out_stft[1], clean_stft[1],True)
+                PESQ += pesq(clean_acc, out_acc, fs)
+                STOI += stoi(clean_acc, out_acc, fs)
         
             loss /= args.batch_size
             PESQ /= args.batch_size
-            STOI /= agrs.batch_size	
+            STOI /= args.batch_size	
             #calculate LOSS
             #loss =  wSDRLoss(train_mixed, train_clean, out_audio)
             #loss = torch.nn.MSELoss(out_audio, train_clean)
@@ -141,7 +149,7 @@ def main():
 
 
             #flot tensorboard
-            if iteration % "num" == 0:
+            if iteration % 2000 == 0:
                 summary.add_scalar('Train Loss', loss.item(), iteration)
                 print('[epoch: {}, iteration: {}] train loss : {:.4f} PESQ : {:.4f} STOI : {:.4f}'.format(epoch, iteration, loss, PESQ, STOI))
 
