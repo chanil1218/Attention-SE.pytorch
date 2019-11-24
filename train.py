@@ -12,25 +12,22 @@ from torch.utils.data import DataLoader
 import torchvision 
 from torchvision import transforms
 
-!pip install tensorboardX
-!pip install tensorflow-gpu=="version"
 import tensorboardX
 from tensorboardX import SummaryWriter
 
 
 from scipy.io import wavfile
-import liborosa
+import librosa
 
-!pip install https://github.com/vBaiCai/python-pesq/archive/master.zip
-!pip install pystoi
 import soundfile as sf
 from pystoi.stoi import stoi
 from pypesq import pesq
 
+from tqdm import tqdm
 from models.layers.istft import ISTFT
 import train_utils
-import load_dataset
-
+from load_dataset import AudioDataset
+from models.unet import Unet
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--model_dir', default='experiments/base_model', help="Directory containing params.json")
@@ -48,47 +45,50 @@ istft = ISTFT(n_fft, hop_length, window='hanning').cuda()
 
 def main():
     summary = SummaryWriter()
-    os.system('tensorboard --logdir=path_of_log_file')
+    #os.system('tensorboard --logdir=path_of_log_file')
 
     #set Hyper parameter
     json_path = os.path.join(args.model_dir)
-    params = utils.Params(json_path)
+    params = train_utils.Params(json_path)
 
     #data loader
     train_dataset = AudioDataset(data_type='train')
     train_data_loader = DataLoader(dataset=train_dataset, batch_size=4, collate_fn=train_dataset.collate, shuffle=True, num_workers=4)
-    valid_dataset = AudioDataset(data_type='valid')
+    valid_dataset = AudioDataset(data_type='val')
     valid_data_loader = DataLoader(dataset=valid_dataset, batch_size=4, collate_fn=valid_dataset.collate, shuffle=False, num_workers=4)
     #model select
+    print('Model initializing\n')
     net = Unet(params.model).cuda()
     optimizer = optim.Adam(net.parameters(), lr=1e-3)
 
     #check point load
     #Check point load
 
-    ckpt_dir = os.path.join(gdrive_root, 'checkpoints')
+    print('Trying Checkpoint Load\n')
+    ckpt_dir = 'ckpt_dir'
     if not os.path.exists(ckpt_dir):
-    os.makedirs(ckpt_dir)
+    	os.makedirs(ckpt_dir)
 
     best_pesq = 0.
     best_stoi = 0.
     ckpt_path = os.path.join(ckpt_dir, 'SEckpt.pt')
     if os.path.exists(ckpt_path):
-    ckpt = torch.load(ckpt_path)
-    try:
-        net.load_state_dict(ckpt['model'])
-        optimizer.load_state_dict(ckpt['optimizer'])
-        best_pesq = ckpt['best_pesq']
-    except RuntimeError as e:
-        print('wrong checkpoint')
+    	ckpt = torch.load(ckpt_path)
+    	try:
+       		net.load_state_dict(ckpt['model'])
+        	optimizer.load_state_dict(ckpt['optimizer'])
+        	best_pesq = ckpt['best_pesq']
+    	except RuntimeError as e:
+        	print('wrong checkpoint\n')
     else:    
         print('checkpoint is loaded !')
         print('current best pesq : %.4f' % best_pesq)
         print('current best stoi : %.4f' % best_stoi)
     
+    print('Training Start!')
     #train
     iteration = 0
-    for epoch in range(args.num_epoch):
+    for epoch in range(args.num_epochs):
         train_bar = tqdm(train_data_loader)
         for input in train_bar:
             iteration += 1
@@ -104,14 +104,28 @@ def main():
             out_audio = torch.squeeze(out_audio, dim=1)
             for i, l in enumerate(seq_len):
                 out_audio[i, l:] = 0
-            librosa.output.write_wav('mixed.wav', train_mixed[0].cpu().data.numpy()[:seq_len[0].cpu().data.numpy()], 16000)
-            librosa.output.write_wav('clean.wav', train_clean[0].cpu().data.numpy()[:seq_len[0].cpu().data.numpy()], 16000)
-            librosa.output.write_wav('out.wav', out_audio[0].cpu().data.numpy()[:seq_len[0].cpu().data.numpy()], 16000)
 
+	    loss = 0
+            PESQ = 0
+	    STOI = 0
+	    for i in range(args.batch_size):
+            	librosa.output.write_wav('mixed.wav', train_mixed[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
+            	librosa.output.write_wav('clean.wav', train_clean[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
+            	librosa.output.write_wav('out.wav', out_audio[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
+		out = stft(out_audio[i]).unsqueeze(dim=1)
+		clean = stft(train_clean[i]).unsqueeze(dim=1)
+		loss += torch.nn.MSELoss(out, clean)
+		PESQ += pesq('clean.wav', 'out.wav', 16000)
+		STOI += stoi('clean.wav', 'out.wav', 16000)
+	
+	    loss /= args.batch_size
+	    PESQ /= args.batch_size
+	    STOI /= agrs.batch_size	
             #calculate LOSS
             #loss =  wSDRLoss(train_mixed, train_clean, out_audio)
-            loss = torch.nn.MSELoss(out_audio, train_clean)
-            #gradient optimizer
+            #loss = torch.nn.MSELoss(out_audio, train_clean)
+           
+	    #gradient optimizer
             optimizer.zero_grad()
 
             #backpropagate LOSS
@@ -121,9 +135,9 @@ def main():
             optimizer.step()
 
             #calculate accuracy
-            PESQ = pesq('clean.wav', 'out.wav', 16000)
+            #PESQ = pesq('clean.wav', 'out.wav', 16000)
 
-            STOI = stoi('clean.wav', 'out.wav', 16000)
+            #STOI = stoi('clean.wav', 'out.wav', 16000)
 
 
             #flot tensorboard
@@ -135,7 +149,7 @@ def main():
             n = 0
             test_loss = 0
             test_acc = 0
-            test_bar = tqdm(test_train_loader)
+            test_bar = tqdm(valid_data_loader)
             for input in test_bar:
                 test_mixed, text_clean, seq_len
                 logits_real, logits_imag = net(input)
