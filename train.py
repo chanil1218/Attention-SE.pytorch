@@ -36,6 +36,7 @@ parser.add_argument('--model_dir', default='experiment/SE_model.json', help="Dir
 parser.add_argument('--restore_file', default=None, help="Optional, name of the file in --model_dir containing weights to reload before training")  # 'best' or 'train'
 parser.add_argument('--batch_size', default=128, type=int, help='train batch size')
 parser.add_argument('--num_epochs', default=100, type=int, help='train epochs number')
+parser.add_argument('--dropout_p', default = 0, type=float, help='Attention model drop out rate')
 args = parser.parse_args()
 
 
@@ -61,7 +62,7 @@ def main():
     valid_data_loader = DataLoader(dataset=valid_dataset, batch_size=args.batch_size, collate_fn=valid_dataset.collate, shuffle=False, num_workers=4)
     #model select
     print('Model initializing\n')
-    net = AttentionModel(257, 112).cuda()
+    net = AttentionModel(257, 112, dropout_p = args.dropout_p).cuda()
     optimizer = optim.Adam(net.parameters(), lr=5e-4)
 
     scheduler = ExponentialLR(optimizer, 0.5)
