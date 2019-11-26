@@ -47,7 +47,7 @@ stft = lambda x: torch.stft(x, n_fft, hop_length, window=window)
 # ISTFT
 istft = ISTFT(n_fft, hop_length, window='hanning').cuda()
 
-def main():
+def main():    
     summary = SummaryWriter()
     #os.system('tensorboard --logdir=path_of_log_file')
 
@@ -58,8 +58,8 @@ def main():
     #data loader
     train_dataset = AudioDataset(data_type='train')
     train_data_loader = DataLoader(dataset=train_dataset, batch_size=args.batch_size, collate_fn=train_dataset.collate, shuffle=True, num_workers=4)
-    valid_dataset = AudioDataset(data_type='val')
-    valid_data_loader = DataLoader(dataset=valid_dataset, batch_size=args.batch_size, collate_fn=valid_dataset.collate, shuffle=False, num_workers=4)
+    test_dataset = AudioDataset(data_type='test')
+    test_data_loader = DataLoader(dataset=test_dataset, batch_size=args.batch_size, collate_fn=test_dataset.collate, shuffle=False, num_workers=4)
     #model select
     print('Model initializing\n')
     net = AttentionModel(257, 112, dropout_p = args.dropout_p).cuda()
@@ -99,15 +99,21 @@ def main():
     for epoch in range(args.num_epochs):
         train_bar = tqdm(train_data_loader)
         # train_bar = train_data_loader
+        n = 0
+        avg_loss = 0
         for input in train_bar:
             iteration += 1
             #load data
             train_mixed, train_clean, seq_len = map(lambda x: x.cuda(), input)
+            
             mixed = stft(train_mixed)
+            cleaned = stft(train_clean)
             mixed = mixed.transpose(1,2)
+            cleaned = cleaned.transpose(1,2)
             real, imag = mixed[..., 0], mixed[..., 1]
-
+            clean_real, clean_imag = cleaned[..., 0], cleaned[..., 1]
             mag = torch.sqrt(real**2 + imag**2)
+            clean_mag = torch.sqrt(clean_real**2 + clean_imag**2)
             phase = torch.atan2(imag, real)
 
             #feed data
@@ -122,67 +128,57 @@ def main():
             out_audio = torch.squeeze(out_audio, dim=1)
             for i, l in enumerate(seq_len):
                 out_audio[i, l:] = 0
-
+            
             loss = 0
             PESQ = 0
             STOI = 0
-            for i in range(len(train_mixed)):
-                librosa.output.write_wav('mixed.wav', train_mixed[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
-                librosa.output.write_wav('clean.wav', train_clean[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
-                librosa.output.write_wav('out.wav', out_audio[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
-                out_acc, fs = sf.read('out.wav')
-                clean_acc, fs = sf.read('clean.wav')
-                out_stft = stft(out_audio[i]).unsqueeze(dim=1)
-                clean_stft = stft(train_clean[i]).unsqueeze(dim=1)
-                loss += F.mse_loss(out_stft[1], clean_stft[1],True)
-                PESQ += pesq(clean_acc, out_acc, fs)
-                STOI += stoi(clean_acc, out_acc, fs, extended=False)
-        
-            loss /= len(train_mixed)
-            PESQ /= len(train_mixed)
-            STOI /= len(train_mixed)	
-            #calculate LOSS
-            #loss =  wSDRLoss(train_mixed, train_clean, out_audio)
-            #loss = torch.nn.MSELoss(out_audio, train_clean)
-           
-	    #gradient optimizer
+            loss = F.mse_loss(out_mag, clean_mag, True)
+            avg_loss += loss
+            n += 1
+            
+            #gradient optimizer
             optimizer.zero_grad()
 
+            
             #backpropagate LOSS
             loss.backward()
 
+
             #update weight
             optimizer.step()
-
-            #calculate accuracy
-            #PESQ = pesq('clean.wav', 'out.wav', 16000)
-
-            #STOI = stoi('clean.wav', 'out.wav', 16000)
-
+            
+            for i in range(len(train_mixed)):
+                PESQ += pesq(train_clean[i].cpu().data.numpy(), out_audio[i].cpu().data.numpy(), 16000)
+                STOI += stoi(train_clean[i].cpu().data.numpy(), out_audio[i].cpu().data.numpy(), 16000, extended=False)
+            PESQ /= len(train_mixed)
+            STOI /= len(train_mixed)
 
             #flot tensorboard
-            if (iteration % 2000) == 0:
-                summary.add_scalar('Train Loss', loss.item(), iteration)
-                print('[epoch: {}, iteration: {}] train loss : {:.4f} PESQ : {:.4f} STOI : {:.4f}'.format(epoch, iteration, loss, PESQ, STOI))
+            if iteration % 100 == 0 : 
+                print('[epoch: {}, iteration: {}] avg_train loss : {:.4f} PESQ : {:.4f} STOI : {:.4f}'.format(epoch, iteration, loss, PESQ, STOI))
         
-        train_losses.append(loss)
-        if  (len(train_losses) > 2) and (train_losses[-2] < loss):
+        avg_loss /= n
+        summary.add_scalar('Train Loss', avg_loss.item(), iteration)
+        
+        train_losses.append(avg_loss)
+        if  (len(train_losses) > 2) and (train_losses[-2] < avg_loss):
             print("Learning rate Decay")
             scheduler.step()
 
         #test phase
         n = 0
-        test_loss = 0
-        test_PESQ = 0
-        test_STOI = 0
-        test_bar = tqdm(valid_data_loader)
+        avg_test_loss = 0
+        test_bar = tqdm(test_data_loader)
         for input in test_bar:
             test_mixed, test_clean, seq_len = map(lambda x: x.cuda(), input)
             mixed = stft(test_mixed)
+            cleaned = stft(test_clean)
             mixed = mixed.transpose(1,2)
+            cleaned = cleaned.transpose(1,2)
             real, imag = mixed[..., 0], mixed[..., 1]
-
+            clean_real, clean_imag = cleaned[..., 0], cleaned[..., 1]
             mag = torch.sqrt(real**2 + imag**2)
+            clean_mag = torch.sqrt(clean_real**2 + clean_imag**2)
             phase = torch.atan2(imag, real)
 
             logits_mag, logits_attn_weight = net(mag)
@@ -196,22 +192,21 @@ def main():
             logits_audio = torch.squeeze(logits_audio, dim=1)
             for i, l in enumerate(seq_len):
                 logits_audio[i, l:] = 0
+            
+            test_loss = 0
+            test_PESQ = 0
+            test_STOI = 0
+            
+            test_loss = F.mse_loss(logits_mag, clean_mag, True)
             for i in range(len(test_mixed)):
-                librosa.output.write_wav('test_mixed.wav', test_mixed[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
-                librosa.output.write_wav('test_clean.wav', test_clean[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
-                librosa.output.write_wav('test_out.wav', logits_audio[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
-                out_acc, fs = sf.read('test_out.wav')
-                clean_acc, fs = sf.read('test_clean.wav')
-                out_stft = stft(logits_audio[i]).unsqueeze(dim=1)
-                clean_stft = stft(test_clean[i]).unsqueeze(dim=1)
-                test_loss += F.mse_loss(out_stft[1], clean_stft[1],True)
-                test_PESQ += pesq(clean_acc, out_acc, fs)
-                test_STOI += stoi(clean_acc, out_acc, fs, extended=False)
+                #librosa.output.write_wav('test_out.wav', logits_audio[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
+                test_PESQ += pesq(test_clean[i].cpu().data.numpy(), logits_audio[i].cpu().data.numpy(), 16000)
+                test_STOI += stoi(test_clean[i].cpu().data.numpy(), logits_audio[i].cpu().data.numpy(), 16000, extended=False)
         
-            test_loss /= len(test_mixed)
             test_PESQ /= len(test_mixed)
             test_STOI /= len(test_mixed)	
-
+            avg_test_loss += test_loss
+            n += 1
             #test loss
             #test_loss = wSDRLoss(test_mixed, test_clean, out_audio)
             #test_loss = torch.nn.MSELoss(out_audio, test_clean)
@@ -220,12 +215,13 @@ def main():
             #test_pesq = pesq('test_clean.wav', 'test_out.wav', 16000)
             #test_stoi = stoi('test_clean.wav', 'test_out.wav', 16000)
 
-        summary.add_scalar('Test Loss', test_loss.item(), iteration)
-        print('[epoch: {}, iteration: {}] test loss : {:.4f} PESQ : {:.4f} STOI : {:.4f}'.format(epoch, iteration, test_loss, test_PESQ, test_STOI))
+        avg_test_loss /= n
+        summary.add_scalar('Test Loss', avg_test_loss.item(), iteration)
+        print('[epoch: {}, iteration: {}] test loss : {:.4f} PESQ : {:.4f} STOI : {:.4f}'.format(epoch, iteration, avg_test_loss, test_PESQ, test_STOI))
         if test_PESQ > best_PESQ or test_STOI > best_STOI:
             best_PESQ = test_PESQ
             best_STOI = test_STOI
-
+            
             # Note: optimizer also has states ! don't forget to save them as well.
             ckpt = {'model':net.state_dict(),
                     'optimizer':optimizer.state_dict(),
