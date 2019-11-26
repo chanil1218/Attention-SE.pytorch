@@ -5,7 +5,7 @@ import numpy as np
 
 
 class AttentionModel(nn.Module):
-    def __init__(self, input_size, hidden_size, stacked_encoder=False, use_attn=True, attn_len=0):
+    def __init__(self, input_size, hidden_size, stacked_encoder=False, use_attn=True, attn_len=0, dropout_p=0):
         # attn_len 0 for full attention(Causal Dynamic Attention),
         # Else x_t-w, ..., x_t only used(Causeal Local Attention).
         super(AttentionModel, self).__init__()
@@ -13,13 +13,16 @@ class AttentionModel(nn.Module):
         self.use_attn = use_attn
         self.attn_len = attn_len
 
+        # Encoder
         self.feat = nn.Linear(input_size, hidden_size)
+        self.dropout = nn.Dropout(dropout_p)
         self.k_enc = nn.LSTM(hidden_size, hidden_size)
         self.q_enc = nn.LSTM(hidden_size, hidden_size)
 
-        # TODO - Dropout
+        # Attention
         self.score = nn.Linear(hidden_size, hidden_size, bias=False)
 
+        # Generator
         enhance_in = hidden_size * (2 if use_attn else 1)
         self.enhance = nn.Linear(enhance_in, hidden_size)
         self.mask = nn.Linear(hidden_size, input_size)
@@ -27,10 +30,11 @@ class AttentionModel(nn.Module):
     def forward(self, x):
         # x dim (B, T, F)
         input_x = x
-        # TODO - Put dropout somewhere
 
         # Encoder
         x = self.feat(x)
+        # TODO - Not sure it is good place to dropout
+        x = self.dropout(x)
         k, _ = self.k_enc(x)
         q, _ = self.q_enc(k if self.stacked_encoder else x)
 
