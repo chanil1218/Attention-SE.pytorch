@@ -47,6 +47,19 @@ stft = lambda x: torch.stft(x, n_fft, hop_length, window=window)
 # ISTFT
 istft = ISTFT(n_fft, hop_length, window='hanning').cuda()
 
+def normalized(tensor):
+    output = [[] for i in range(len(tensor))]
+
+    for i in range(len(tensor)):
+        nummer = tensor[i] - torch.min(tensor[i])
+        denomi = torch.max(tensor[i]) - torch.min(tensor[i])
+        
+        output[i] = (nummer / (denomi + 1e-5)).tolist()
+
+
+    return torch.tensor(output)
+
+
 def main():    
     summary = SummaryWriter()
     #os.system('tensorboard --logdir=path_of_log_file')
@@ -64,7 +77,7 @@ def main():
     print('Model initializing\n')
     net = AttentionModel(257, 112, dropout_p = args.dropout_p).cuda()
     optimizer = optim.Adam(net.parameters(), lr=5e-4)
-
+    
     scheduler = ExponentialLR(optimizer, 0.5)
 
     #check point load
@@ -135,7 +148,6 @@ def main():
             loss = F.mse_loss(out_mag, clean_mag, True)
             avg_loss += loss
             n += 1
-            
             #gradient optimizer
             optimizer.zero_grad()
 
