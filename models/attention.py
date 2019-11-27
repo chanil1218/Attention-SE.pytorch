@@ -35,6 +35,8 @@ class AttentionModel(nn.Module):
         x = self.feat(x).tanh()
         # TODO - Not sure it is good place to dropout
         x = self.dropout(x)
+        self.k_enc.flatten_parameters()
+        self.q_enc.flatten_parameters()
         k, _ = self.k_enc(x)
         q, _ = self.q_enc(k if self.stacked_encoder else x)
 

@@ -37,6 +37,8 @@ parser.add_argument('--restore_file', default=None, help="Optional, name of the 
 parser.add_argument('--batch_size', default=128, type=int, help='train batch size')
 parser.add_argument('--num_epochs', default=100, type=int, help='train epochs number')
 parser.add_argument('--dropout_p', default = 0, type=float, help='Attention model drop out rate')
+parser.add_argument('--learning_rate', default = 5e-4, type=float, help = 'Learning rate')
+parser.add_argument('--attn_use', default = False, type=bool)
 args = parser.parse_args()
 
 
@@ -61,7 +63,7 @@ def normalized(tensor):
 
 
 def main():    
-    summary = SummaryWriter()
+    #summary = SummaryWriter()
     #os.system('tensorboard --logdir=path_of_log_file')
 
     #set Hyper parameter
@@ -75,8 +77,12 @@ def main():
     test_data_loader = DataLoader(dataset=test_dataset, batch_size=args.batch_size, collate_fn=test_dataset.collate, shuffle=False, num_workers=4)
     #model select
     print('Model initializing\n')
-    net = AttentionModel(257, 112, dropout_p = args.dropout_p).cuda()
-    optimizer = optim.Adam(net.parameters(), lr=5e-4)
+    net = torch.nn.DataParallel(AttentionModel(257, 112, dropout_p = args.dropout_p, use_attn = args.attn_use))
+    #net = AttentionModel(257, 112, dropout_p = args.dropout_p, use_attn = args.attn_use)
+    net = net.cuda()
+    print(net)
+
+    optimizer = optim.Adam(net.parameters(), lr=args.learning_rate)
     
     scheduler = ExponentialLR(optimizer, 0.5)
 
@@ -114,11 +120,12 @@ def main():
         # train_bar = train_data_loader
         n = 0
         avg_loss = 0
+        net.train()
         for input in train_bar:
             iteration += 1
             #load data
             train_mixed, train_clean, seq_len = map(lambda x: x.cuda(), input)
-            
+
             mixed = stft(train_mixed)
             cleaned = stft(train_clean)
             mixed = mixed.transpose(1,2)
@@ -128,9 +135,10 @@ def main():
             mag = torch.sqrt(real**2 + imag**2)
             clean_mag = torch.sqrt(clean_real**2 + clean_imag**2)
             phase = torch.atan2(imag, real)
+            
 
             #feed data
-            out_mag, attn_wegiht = net(mag)
+            out_mag, attn_weight = net(mag)
             out_real = out_mag * torch.cos(phase)
             out_imag = out_mag * torch.sin(phase)
             out_real, out_imag = torch.squeeze(out_real, 1), torch.squeeze(out_imag, 1)
@@ -145,7 +153,14 @@ def main():
             loss = 0
             PESQ = 0
             STOI = 0
+            
             loss = F.mse_loss(out_mag, clean_mag, True)
+            if torch.any(torch.isnan(loss)):
+                print(out_mag)
+                print(attn_weight)
+                print(loss)
+                torch.save({'clean_mag': clean_mag, 'out_mag': out_mag, 'mag': mag}, 'nan_mag')
+                raise('loss is NaN')
             avg_loss += loss
             n += 1
             #gradient optimizer
@@ -159,18 +174,18 @@ def main():
             #update weight
             optimizer.step()
             
-            for i in range(len(train_mixed)):
-                PESQ += pesq(train_clean[i].cpu().data.numpy(), out_audio[i].cpu().data.numpy(), 16000)
-                STOI += stoi(train_clean[i].cpu().data.numpy(), out_audio[i].cpu().data.numpy(), 16000, extended=False)
-            PESQ /= len(train_mixed)
-            STOI /= len(train_mixed)
+            #for i in range(len(train_mixed)):
+            #    PESQ += pesq(train_clean[i].cpu().data.numpy(), out_audio[i].cpu().data.numpy(), 16000)
+            #    STOI += stoi(train_clean[i].cpu().data.numpy(), out_audio[i].cpu().data.numpy(), 16000, extended=False)
+            #PESQ /= len(train_mixed)
+            #STOI /= len(train_mixed)
 
             #flot tensorboard
-            if iteration % 100 == 0 : 
-                print('[epoch: {}, iteration: {}] avg_train loss : {:.4f} PESQ : {:.4f} STOI : {:.4f}'.format(epoch, iteration, loss, PESQ, STOI))
+            if iteration % 1000 == 0 : 
+                print('[epoch: {}, iteration: {}] train loss : {:.4f} PESQ : {:.4f} STOI : {:.4f}'.format(epoch, iteration, loss, PESQ, STOI))
         
         avg_loss /= n
-        summary.add_scalar('Train Loss', avg_loss.item(), iteration)
+        #summary.add_scalar('Train Loss', avg_loss.item(), iteration)
         
         train_losses.append(avg_loss)
         if  (len(train_losses) > 2) and (train_losses[-2] < avg_loss):
@@ -181,54 +196,57 @@ def main():
         n = 0
         avg_test_loss = 0
         test_bar = tqdm(test_data_loader)
-        for input in test_bar:
-            test_mixed, test_clean, seq_len = map(lambda x: x.cuda(), input)
-            mixed = stft(test_mixed)
-            cleaned = stft(test_clean)
-            mixed = mixed.transpose(1,2)
-            cleaned = cleaned.transpose(1,2)
-            real, imag = mixed[..., 0], mixed[..., 1]
-            clean_real, clean_imag = cleaned[..., 0], cleaned[..., 1]
-            mag = torch.sqrt(real**2 + imag**2)
-            clean_mag = torch.sqrt(clean_real**2 + clean_imag**2)
-            phase = torch.atan2(imag, real)
 
-            logits_mag, logits_attn_weight = net(mag)
-            logits_real = logits_mag * torch.cos(phase)
-            logits_imag = logits_mag * torch.sin(phase)
-            logits_real, logits_imag = torch.squeeze(logits_real, 1), torch.squeeze(logits_imag, 1)
-            logits_real = logits_real.transpose(1,2)
-            logits_imag = logits_imag.transpose(1,2)
+        net.eval()
+        with torch.no_grad():
+            for input in test_bar:
+                test_mixed, test_clean, seq_len = map(lambda x: x.cuda(), input)
+                mixed = stft(test_mixed)
+                cleaned = stft(test_clean)
+                mixed = mixed.transpose(1,2)
+                cleaned = cleaned.transpose(1,2)
+                real, imag = mixed[..., 0], mixed[..., 1]
+                clean_real, clean_imag = cleaned[..., 0], cleaned[..., 1]
+                mag = torch.sqrt(real**2 + imag**2)
+                clean_mag = torch.sqrt(clean_real**2 + clean_imag**2)
+                phase = torch.atan2(imag, real)
                 
-            logits_audio = istft(logits_real, logits_imag, test_mixed.size(1))
-            logits_audio = torch.squeeze(logits_audio, dim=1)
-            for i, l in enumerate(seq_len):
-                logits_audio[i, l:] = 0
+                logits_mag, logits_attn_weight = net(mag)
+                logits_real = logits_mag * torch.cos(phase)
+                logits_imag = logits_mag * torch.sin(phase)
+                logits_real, logits_imag = torch.squeeze(logits_real, 1), torch.squeeze(logits_imag, 1)
+                logits_real = logits_real.transpose(1,2)
+                logits_imag = logits_imag.transpose(1,2)
+                    
+                logits_audio = istft(logits_real, logits_imag, test_mixed.size(1))
+                logits_audio = torch.squeeze(logits_audio, dim=1)
+                for i, l in enumerate(seq_len):
+                    logits_audio[i, l:] = 0
+                
+                test_loss = 0
+                test_PESQ = 0
+                test_STOI = 0
+                
+                test_loss = F.mse_loss(logits_mag, clean_mag, True)
+                #for i in range(len(test_mixed)):
+                    #librosa.output.write_wav('test_out.wav', logits_audio[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
+                #    test_PESQ += pesq(test_clean[i].detach().cpu().numpy(), logits_audio[i].detach().cpu().numpy(), 16000)
+                #    test_STOI += stoi(test_clean[i].detach().cpu().numpy(), logits_audio[i].detach().cpu().numpy(), 16000, extended=False)
             
-            test_loss = 0
-            test_PESQ = 0
-            test_STOI = 0
-            
-            test_loss = F.mse_loss(logits_mag, clean_mag, True)
-            for i in range(len(test_mixed)):
-                #librosa.output.write_wav('test_out.wav', logits_audio[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
-                test_PESQ += pesq(test_clean[i].cpu().data.numpy(), logits_audio[i].cpu().data.numpy(), 16000)
-                test_STOI += stoi(test_clean[i].cpu().data.numpy(), logits_audio[i].cpu().data.numpy(), 16000, extended=False)
-        
-            test_PESQ /= len(test_mixed)
-            test_STOI /= len(test_mixed)	
-            avg_test_loss += test_loss
-            n += 1
-            #test loss
-            #test_loss = wSDRLoss(test_mixed, test_clean, out_audio)
-            #test_loss = torch.nn.MSELoss(out_audio, test_clean)
+                test_PESQ /= len(test_mixed)
+                test_STOI /= len(test_mixed)	
+                avg_test_loss += test_loss
+                n += 1
+                #test loss
+                #test_loss = wSDRLoss(test_mixed, test_clean, out_audio)
+                #test_loss = torch.nn.MSELoss(out_audio, test_clean)
 
-            #test accuracy
-            #test_pesq = pesq('test_clean.wav', 'test_out.wav', 16000)
-            #test_stoi = stoi('test_clean.wav', 'test_out.wav', 16000)
+                #test accuracy
+                #test_pesq = pesq('test_clean.wav', 'test_out.wav', 16000)
+                #test_stoi = stoi('test_clean.wav', 'test_out.wav', 16000)
 
         avg_test_loss /= n
-        summary.add_scalar('Test Loss', avg_test_loss.item(), iteration)
+        #summary.add_scalar('Test Loss', avg_test_loss.item(), iteration)
         print('[epoch: {}, iteration: {}] test loss : {:.4f} PESQ : {:.4f} STOI : {:.4f}'.format(epoch, iteration, avg_test_loss, test_PESQ, test_STOI))
         if test_PESQ > best_PESQ or test_STOI > best_STOI:
             best_PESQ = test_PESQ
