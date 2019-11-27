@@ -40,6 +40,7 @@ class AttentionModel(nn.Module):
 
         # Attention
         out = q
+        attn_weights = None
         if self.use_attn:
             # attn_score dim (B x T x T'(k))
             attn_score = torch.bmm(self.score(q), k.transpose(1, 2))
