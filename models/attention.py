@@ -44,7 +44,7 @@ class AttentionModel(nn.Module):
         if self.use_attn:
             # attn_score dim (B x T x T'(k))
             attn_score = torch.bmm(self.score(q), k.transpose(1, 2))
-            attn_max = torch.max(attn_score, dim=-1, keepdim=True) # For numerial stability
+            attn_max, _ = torch.max(attn_score, dim=-1, keepdim=True) # For numerial stability
             exp_score = torch.exp(attn_score - attn_max)
 
             # Causal contraints(score <= t)
