@@ -32,7 +32,7 @@ class AttentionModel(nn.Module):
         input_x = x
 
         # Encoder
-        x = self.feat(x)
+        x = self.feat(x).tanh()
         # TODO - Not sure it is good place to dropout
         x = self.dropout(x)
         k, _ = self.k_enc(x)
