@@ -125,10 +125,15 @@ test5_tar_path = os.path.join(dataset_path, "test5.tar.gz")
 
 # DATA LOADING - LOAD FILE LISTS
 def load_data_list(folder=dataset_path, setname='train'):
-    assert(setname in ['train', 'val'])
+    assert(setname in ['train', 'val', 'test', 'test2', 'test3', 'test4'])
 
     dataset = {}
-    foldername = folder + '/' + setname + "set"
+    
+    if "test" in setname:
+      clean_foldername = folder + '/testset'
+    else:
+      clean_foldername = folder + '/' + setname + "set"
+    noisy_foldername = folder + '/' + setname + "set"
     
 
     print("Loading files...")
@@ -136,17 +141,17 @@ def load_data_list(folder=dataset_path, setname='train'):
     dataset['outnames'] = []
     dataset['shortnames'] = []
 
-    noisy_filelist = os.listdir("%s_noisy"%(foldername))
+    noisy_filelist = os.listdir("%s_noisy"%(noisy_foldername))
     noisy_filelist.sort()
     # filelist = [f for f in filelist if f.endswith(".wav")]
     for i in tqdm(noisy_filelist):
-        dataset['innames'].append("%s_noisy/%s"%(foldername,i))
+        dataset['innames'].append("%s_noisy/%s"%(noisy_foldername,i))
         dataset['shortnames'].append("%s"%(i))
         
-    clean_filelist = os.listdir("%s_clean"%(foldername))
+    clean_filelist = os.listdir("%s_clean"%(clean_foldername))
     clean_filelist.sort()
     for i in tqdm(clean_filelist):
-        dataset['outnames'].append("%s_clean/%s"%(foldername,i))
+        dataset['outnames'].append("%s_clean/%s"%(clean_foldername,i))
 
     return dataset
 
@@ -217,13 +222,12 @@ class AudioDataset(data.Dataset):
 # # valid_data_loader = DataLoader(dataset=valid_dataset, batch_size=4,
 # #         collate_fn=valid_dataset.collate, shuffle=False, num_workers=4)
 # train_bar = tqdm(train_data_loader)
-# for t in train_bar:
-#   print(len(t))
-#   print(t)
-#   print(t[0].size())
-#   # print(t[0].cuda().size())
-#   print(t[1].size())
-#   # print(t[1].cuda().size())
-#   print(t[2].size())
-#   # print(t[2].cuda().size())
-#   break
+
+# test_dataset = AudioDataset(data_type='test')
+# test_data_loader = DataLoader(dataset=test_dataset, batch_size=4,
+#        collate_fn=test_dataset.collate, shuffle=True, num_workers=4)
+
+# test_dataset2 = AudioDataset(data_type='test2')
+# test_data_loader2 = DataLoader(dataset=test_dataset2, batch_size=4,
+#        collate_fn=test_dataset2.collate, shuffle=True, num_workers=4)
+
