@@ -16,8 +16,8 @@ class AttentionModel(nn.Module):
         # Encoder
         self.feat = nn.Linear(input_size, hidden_size)
         self.dropout = nn.Dropout(dropout_p)
-        self.k_enc = nn.LSTM(hidden_size, hidden_size)
-        self.q_enc = nn.LSTM(hidden_size, hidden_size)
+        self.k_enc = nn.LSTM(hidden_size, hidden_size, batch_first=True)
+        self.q_enc = nn.LSTM(hidden_size, hidden_size, batch_first=True)
 
         # Attention
         self.score = nn.Linear(hidden_size, hidden_size, bias=False)
