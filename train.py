@@ -39,6 +39,9 @@ parser.add_argument('--num_epochs', default=100, type=int, help='train epochs nu
 parser.add_argument('--dropout_p', default = 0, type=float, help='Attention model drop out rate')
 parser.add_argument('--learning_rate', default = 5e-4, type=float, help = 'Learning rate')
 parser.add_argument('--attn_use', default = False, type=bool)
+parser.add_argument('--stacked_encoder', default = False, type = bool)
+parser.add_argument('--attn_len', default = 0, type = int)
+parser.add_argument('--hidden_size', default = 112, type = int)
 args = parser.parse_args()
 
 
@@ -77,7 +80,7 @@ def main():
     test_data_loader = DataLoader(dataset=test_dataset, batch_size=args.batch_size, collate_fn=test_dataset.collate, shuffle=False, num_workers=4)
     #model select
     print('Model initializing\n')
-    net = torch.nn.DataParallel(AttentionModel(257, 112, dropout_p = args.dropout_p, use_attn = args.attn_use))
+    net = torch.nn.DataParallel(AttentionModel(257, hidden_size = args.hidden_size, dropout_p = args.dropout_p, use_attn = args.attn_use, stacked_encoder = args.stacked_encoder, attn_len = args.attn_len))
     #net = AttentionModel(257, 112, dropout_p = args.dropout_p, use_attn = args.attn_use)
     net = net.cuda()
     print(net)
@@ -96,25 +99,28 @@ def main():
 
     best_PESQ = 0.
     best_STOI = 0.
+    best_loss = 200000.
     ckpt_path = os.path.join(ckpt_dir, 'SEckpt.pt')
     if os.path.exists(ckpt_path):
     	ckpt = torch.load(ckpt_path)
     	try:
        	    net.load_state_dict(ckpt['model'])
             optimizer.load_state_dict(ckpt['optimizer'])
-            best_PESQ = ckpt['best_PESQ']
-            best_STOI = ckpt['best_STOI']
+            best_loss = ckpt['best_loss']
+
+            print('checkpoint is loaded !')
+            print('current best loss : %.4f' % best_loss)
     	except RuntimeError as e:
             print('wrong checkpoint\n')
     else:    
-        print('checkpoint is loaded !')
-        print('current best PESQ : %.4f' % best_PESQ)
-        print('current best STOI : %.4f' % best_STOI)
+        print('checkpoint not exist!')
+        print('current best loss : %.4f' % best_loss)
     
     print('Training Start!')
     #train
     iteration = 0
     train_losses = []
+    test_losses = []
     for epoch in range(args.num_epochs):
         train_bar = tqdm(train_data_loader)
         # train_bar = train_data_loader
@@ -156,9 +162,6 @@ def main():
             
             loss = F.mse_loss(out_mag, clean_mag, True)
             if torch.any(torch.isnan(loss)):
-                print(out_mag)
-                print(attn_weight)
-                print(loss)
                 torch.save({'clean_mag': clean_mag, 'out_mag': out_mag, 'mag': mag}, 'nan_mag')
                 raise('loss is NaN')
             avg_loss += loss
@@ -181,7 +184,7 @@ def main():
             #STOI /= len(train_mixed)
 
             #flot tensorboard
-            if iteration % 1000 == 0 : 
+            if iteration % 100 == 0 : 
                 print('[epoch: {}, iteration: {}] train loss : {:.4f} PESQ : {:.4f} STOI : {:.4f}'.format(epoch, iteration, loss, PESQ, STOI))
         
         avg_loss /= n
@@ -233,8 +236,6 @@ def main():
                 #    test_PESQ += pesq(test_clean[i].detach().cpu().numpy(), logits_audio[i].detach().cpu().numpy(), 16000)
                 #    test_STOI += stoi(test_clean[i].detach().cpu().numpy(), logits_audio[i].detach().cpu().numpy(), 16000, extended=False)
             
-                test_PESQ /= len(test_mixed)
-                test_STOI /= len(test_mixed)	
                 avg_test_loss += test_loss
                 n += 1
                 #test loss
@@ -245,20 +246,19 @@ def main():
                 #test_pesq = pesq('test_clean.wav', 'test_out.wav', 16000)
                 #test_stoi = stoi('test_clean.wav', 'test_out.wav', 16000)
 
-        avg_test_loss /= n
+            avg_test_loss /= n
+            test_losses.append(avg_test_loss)
         #summary.add_scalar('Test Loss', avg_test_loss.item(), iteration)
-        print('[epoch: {}, iteration: {}] test loss : {:.4f} PESQ : {:.4f} STOI : {:.4f}'.format(epoch, iteration, avg_test_loss, test_PESQ, test_STOI))
-        if test_PESQ > best_PESQ or test_STOI > best_STOI:
-            best_PESQ = test_PESQ
-            best_STOI = test_STOI
-            
-            # Note: optimizer also has states ! don't forget to save them as well.
-            ckpt = {'model':net.state_dict(),
+            print('[epoch: {}, iteration: {}] test loss : {:.4f} PESQ : {:.4f} STOI : {:.4f}'.format(epoch, iteration, avg_test_loss, test_PESQ, test_STOI))
+            if len(test_losses) >= 2 and avg_test_loss < best_loss:
+                best_PESQ = test_PESQ
+                best_STOI = test_STOI
+                # Note: optimizer also has states ! don't forget to save them as well.
+                ckpt = {'model':net.state_dict(),
                     'optimizer':optimizer.state_dict(),
-                    'best_PESQ':best_PESQ,
-                    'best_STOI':best_STOI}
-            torch.save(ckpt, ckpt_path)
-            print('checkpoint is saved !')
+                    'best_loss':avg_test_loss}
+                torch.save(ckpt, ckpt_path)
+                print('checkpoint is saved !')
 
 if __name__ == '__main__':
     main()
