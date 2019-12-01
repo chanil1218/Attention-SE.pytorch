@@ -14,16 +14,15 @@ from pystoi.stoi import stoi
 from pypesq import pesq
 
 from models.layers.istft import ISTFT
-import train_utils
 from models.attention import AttentionModel
+import utils
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--dropout_p', default = 0, type=float, help='Attention model drop out rate')
 parser.add_argument('--stacked_encoder', default = False, type = bool)
 parser.add_argument('--attn_len', default = 0, type = int)
 parser.add_argument('--hidden_size', default = 112, type = int)
-parser.add_argument('--ck_dir', default = 'ckpt_dir', help = 'ck path')
-parser.add_argument('--ck_name',  help = 'ck file')
+parser.add_argument('--ckpt_path', default = 'ckpt_dir', help = 'ck path')
 parser.add_argument('--test_set',  help = 'test_set')
 parser.add_argument('--attn_use', default = False, type=bool)
 parser.add_argument('--noisy_wav')
@@ -32,31 +31,28 @@ args = parser.parse_args()
 
 
 n_fft, hop_length = 512, 128
-window = torch.hann_window(n_fft).cuda()
+window = torch.hann_window(n_fft)
 # STFT
 stft = lambda x: torch.stft(x, n_fft, hop_length, window=window)
 # ISTFT
-istft = ISTFT(n_fft, hop_length, window='hanning').cuda()
+istft = ISTFT(n_fft, hop_length, window='hanning')
 
 def main():
     #model select
     print('Model initializing\n')
     net = torch.nn.DataParallel(AttentionModel(257, hidden_size = args.hidden_size, dropout_p = args.dropout_p, use_attn = args.attn_use, stacked_encoder = args.stacked_encoder, attn_len = args.attn_len))
-    net = net.cuda()
 
     #Check point load
     print('Trying Checkpoint Load\n')
-    ckpt_dir = args.ck_dir
     best_PESQ = 0.
     best_STOI = 0.
-    ckpt_path = os.path.join(ckpt_dir, args.ck_name)
-
+    ckpt_path = args.ckpt_path
 
     if os.path.exists(ckpt_path):
     	ckpt = torch.load(ckpt_path)
     	try:
        	    net.load_state_dict(ckpt['model'])
-            optimizer.load_state_dict(ckpt['optimizer'])
+            net = net.module # uncover DataParallel
             best_STOI = ckpt['best_STOI']
 
             print('checkpoint is loaded !')
@@ -78,8 +74,10 @@ def main():
         clean_audio = torch.from_numpy(outputData).type(torch.FloatTensor)
 
         mixed = stft(mixed_audio)
-        cleaned = stft(clean_audio)
+        mixed = mixed.unsqueeze(0)
         mixed = mixed.transpose(1,2)
+        cleaned = stft(clean_audio)
+        cleaned = cleaned.unsqueeze(0)
         cleaned = cleaned.transpose(1,2)
         real, imag = mixed[..., 0], mixed[..., 1]
         clean_real, clean_imag = cleaned[..., 0], cleaned[..., 1]
@@ -94,17 +92,32 @@ def main():
         logits_real = logits_real.transpose(1,2)
         logits_imag = logits_imag.transpose(1,2)
 
-        logits_audio = istft(logits_real, logits_imag, mixed_audio.size(1)) # TODO - check dim
+        logits_audio = istft(logits_real, logits_imag, inputData.shape[0])
         logits_audio = torch.squeeze(logits_audio, dim=1)
 
-        librosa.output.write_wav('./out.wav', logits_audio[i].cpu().data.numpy(), 16000)
+        print(logits_audio[0])
+        librosa.output.write_wav('./out.wav', logits_audio[0].cpu().data.numpy(), 16000)
         test_loss = F.mse_loss(logits_mag, clean_mag, True)
-        test_PESQ = pesq(test_clean[i].detach().cpu().numpy(), logits_audio[i].detach().cpu().numpy(), 16000)
-        test_STOI = stoi(test_clean[i].detach().cpu().numpy(), logits_audio[i].detach().cpu().numpy(), 16000, extended=False)
+        test_PESQ = pesq(outputData, logits_audio[0].detach().cpu().numpy(), 16000)
+        test_STOI = stoi(outputData, logits_audio[0].detach().cpu().numpy(), 16000, extended=False)
+
+        print("Saved attention weight visualization to attention_viz.png")
+        utils.plot_head_map(logits_attn_weight[0])
+
+        # FIXME - Issue with pcm_f32le. Require pcm_s16le
+        print("Saved clean spectrogram visualization to spec_clean.png")
+        clean_spect = utils.make_spectrogram_array(args.clean_wav)
+        utils.save_spectrogram(clean_spect, 'clean')
+
+        print("Saved noisy spectrogram visualization to spec_noisy.png")
+        noisy_spect = utils.make_spectrogram_array(args.noisy_wav)
+        utils.save_spectrogram(noisy_spect, 'noisy')
+
+        print("Saved enhanced spectrogram visualization to spec_enhanced.png")
+        enhanced_spect = utils.make_spectrogram_array('./out.wav')
+        utils.save_spectrogram(enhanced_spect, 'enhanced')
 
         #test accuracy
-        #test_pesq = pesq('test_clean.wav', 'test_out.wav', 16000)
-        #test_stoi = stoi('test_clean.wav', 'test_out.wav', 16000)
         print('test loss : {:.4f} PESQ : {:.4f} STOI : {:.4f}'.format(test_loss, test_PESQ, test_STOI))
 
 if __name__ == '__main__':

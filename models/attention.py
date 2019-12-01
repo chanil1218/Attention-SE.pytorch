@@ -55,7 +55,8 @@ class AttentionModel(nn.Module):
                 # Static constraints(t - w <= score)
                 attn_weights = torch.triu(attn_weights, diagonal=-self.attn_len)
             weights_denom = torch.sum(attn_weights, dim=-1, keepdim=True)
-            attn_weights = attn_weights / (weights_denom + 1e-10)
+            #attn_weights = attn_weights / (weights_denom + 1e-10)
+            attn_weights = attn_weights / (weights_denom + 1e-30)
 
             c = torch.bmm(attn_weights, k)
 
