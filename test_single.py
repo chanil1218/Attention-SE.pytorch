@@ -28,7 +28,6 @@ from tqdm import tqdm
 from models.layers.istft import ISTFT
 import train_utils
 from load_single_data import AudioDataset
-from models.unet import Unet
 from models.attention import AttentionModel
 
 parser = argparse.ArgumentParser()
