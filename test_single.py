@@ -27,7 +27,7 @@ from pypesq import pesq
 from tqdm import tqdm
 from models.layers.istft import ISTFT
 import train_utils
-from load_dataset import AudioDataset
+from load_single_data import AudioDataset
 from models.unet import Unet
 from models.attention import AttentionModel
 
@@ -43,6 +43,7 @@ parser.add_argument('--ck_dir', default = 'ckpt_dir', help = 'ck path')
 parser.add_argument('--ck_name',  help = 'ck file')
 parser.add_argument('--test_set',  help = 'test_set')
 parser.add_argument('--attn_use', default = False, type=bool)
+parser.add_argument('--wav')
 args = parser.parse_args()
 
 
@@ -54,16 +55,17 @@ stft = lambda x: torch.stft(x, n_fft, hop_length, window=window)
 istft = ISTFT(n_fft, hop_length, window='hanning').cuda()
 
 def main(): 
-    test_dataset = AudioDataset(data_type=args.test_set)
-    test_data_loader = DataLoader(dataset=test_dataset, batch_size=args.batch_size, collate_fn=test_dataset.collate, shuffle=False, num_workers=4)
     
+    test_data_set = AudioDataset(data_type=args.test_set, data_name=args.wav)
+    test_data_loader = DataLoader(dataset=test_data_set, collate_fn=test_data_set.collate, num_workers=4)
+
+
     
     #model select
     print('Model initializing\n')
     net = torch.nn.DataParallel(AttentionModel(257, hidden_size = args.hidden_size, dropout_p = args.dropout_p, use_attn = args.attn_use, stacked_encoder = args.stacked_encoder, attn_len = args.attn_len))
     #net = AttentionModel(257, 112, dropout_p = args.dropout_p, use_attn = args.attn_use)
     net = net.cuda()
-    print(net)
 
     optimizer = optim.Adam(net.parameters(), lr=args.learning_rate)
 
@@ -76,6 +78,17 @@ def main():
     ckpt_path = os.path.join(ckpt_dir, args.ck_name)
 
 
+    if not os.path.exists('Test_wav_stoi'):
+        os.makedirs('test_wav_stoi')
+    
+    test_dir = os.path.join('Test_wav_stoi', args.ck_name)
+    if not os.path.exists(test_dir):
+        os.makedirs(test_dir)
+
+    test_dir = os.path.join(test_dir, args.test_set)
+    if not os.path.exists(test_dir):
+        os.makedirs(test_dir)
+
     if os.path.exists(ckpt_path):
     	ckpt = torch.load(ckpt_path)
     	try:
@@ -84,12 +97,12 @@ def main():
             best_STOI = ckpt['best_STOI']
 
             print('checkpoint is loaded !')
-            print('current best loss : %.4f' % best_loss)
+            print('current best loss : %.4f' % best_STOI)
     	except RuntimeError as e:
             print('wrong checkpoint\n')
     else:    
         print('checkpoint not exist!')
-        print('current best loss : %.4f' % best_loss)
+        print('current best loss : %.4f' % best_STOI)
 
     #test phase
     n = 0
@@ -129,18 +142,19 @@ def main():
         
             test_loss = F.mse_loss(logits_mag, clean_mag, True)
 
+            mixed_wav = os.path.join(test_dir, 'mixed.wav')
+            
+            clean_wav = os.path.join(test_dir, 'clean.wav')
 
+            out_wav = os.path.join(test_dir, 'out.wav')
 
             for i in range(len(test_mixed)):
-
-
-                librosa.output.write_wav('test_out.wav', logits_audio[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
-                cur_PESQ = pesq(test_clean[i].detach().cpu().numpy(), logits_audio[i].detach().cpu().numpy(), 16000)
-                cur_STOI = stoi(test_clean[i].detach().cpu().numpy(), logits_audio[i].detach().cpu().numpy(), 16000, extended=False)
+                librosa.output.write_wav(mixed_wav, test_mixed[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
+                librosa.output.write_wav(clean_wav, test_clean[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
+                librosa.output.write_wav(out_wav, logits_audio[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
+                test_PESQ += pesq(test_clean[i].detach().cpu().numpy(), logits_audio[i].detach().cpu().numpy(), 16000)
+                test_STOI += stoi(test_clean[i].detach().cpu().numpy(), logits_audio[i].detach().cpu().numpy(), 16000, extended=False)
         
-                test_PESQ += cur_PESQ
-                test_STOI += cur_STOI
-
             test_PESQ /= len(test_mixed)
             test_STOI /= len(test_mixed)	
             avg_test_loss += test_loss
