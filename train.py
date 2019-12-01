@@ -42,6 +42,7 @@ parser.add_argument('--attn_use', default = False, type=bool)
 parser.add_argument('--stacked_encoder', default = False, type = bool)
 parser.add_argument('--attn_len', default = 0, type = int)
 parser.add_argument('--hidden_size', default = 112, type = int)
+parser.add_argument('--ck_name', default = 'SEckpt.pt')
 args = parser.parse_args()
 
 
@@ -100,7 +101,7 @@ def main():
     best_PESQ = 0.
     best_STOI = 0.
     best_loss = 200000.
-    ckpt_path = os.path.join(ckpt_dir, 'SEckpt.pt')
+    ckpt_path = os.path.join(ckpt_dir, args.ck_name)
     if os.path.exists(ckpt_path):
     	ckpt = torch.load(ckpt_path)
     	try:
@@ -234,8 +235,9 @@ def main():
                 #for i in range(len(test_mixed)):
                     #librosa.output.write_wav('test_out.wav', logits_audio[i].cpu().data.numpy()[:seq_len[i].cpu().data.numpy()], 16000)
                 #    test_PESQ += pesq(test_clean[i].detach().cpu().numpy(), logits_audio[i].detach().cpu().numpy(), 16000)
-                #    test_STOI += stoi(test_clean[i].detach().cpu().numpy(), logits_audio[i].detach().cpu().numpy(), 16000, extended=False)
-            
+                   # test_STOI += stoi(test_clean[i].detach().cpu().numpy(), logits_audio[i].detach().cpu().numpy(), 16000, extended=False)
+                
+                #test_STOI /= len(test_mixed)
                 avg_test_loss += test_loss
                 n += 1
                 #test loss
@@ -248,15 +250,16 @@ def main():
 
             avg_test_loss /= n
             test_losses.append(avg_test_loss)
-        #summary.add_scalar('Test Loss', avg_test_loss.item(), iteration)
+            #summary.add_scalar('Test Loss', avg_test_loss.item(), iteration)
             print('[epoch: {}, iteration: {}] test loss : {:.4f} PESQ : {:.4f} STOI : {:.4f}'.format(epoch, iteration, avg_test_loss, test_PESQ, test_STOI))
-            if len(test_losses) >= 2 and avg_test_loss < best_loss:
+            if avg_test_loss < best_loss:
                 best_PESQ = test_PESQ
                 best_STOI = test_STOI
+                best_loss = avg_test_loss
                 # Note: optimizer also has states ! don't forget to save them as well.
                 ckpt = {'model':net.state_dict(),
                     'optimizer':optimizer.state_dict(),
-                    'best_loss':avg_test_loss}
+                    'best_loss':best_loss}
                 torch.save(ckpt, ckpt_path)
                 print('checkpoint is saved !')
 
