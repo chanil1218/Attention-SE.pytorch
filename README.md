@@ -1,11 +1,27 @@
 # Attention-SE.pytorch
 AN ATTENTION-BASED NEURAL NETWORK APPROACH FOR SINGLE CHANNEL SPEECH ENHANCEMENT
 
-## Data Loading Script
-Reference URL : 
-- https://github.com/sweetcocoa/DeepComplexUNetPyTorch
-- https://github.com/jtkim-kaist/Speech-enhancement
-- https://github.com/chanil1218/DCUnet.pytorch
+## Requirements
+
+* PYSTOI 
+  * Toolbox : [mpariente/pystoi](https://github.com/mpariente/pystoi)
+* PYPESQ
+  * ToolBox : [vBaiCai/python-pesq](https://github.com/vBaiCai/python-pesq)
+* version
+```python3
+torch == 1.2.0
+numpy 
+librosa
+```
+
+## DataSet
+Noise dataset uses 'MUSAN' dataset
+We generate noisy mixed data from dataset
+
+|Set|Train|Valid|Test|Test2|Test3|Test4|
+|---|-----|-----|----|-----|-----|-----|
+|Noise|Musan|Musan|Musan|Musan|DEMAND|DEMAND|
+|SNR|0-20dB|0-20dB|0-20dB|-5-0dB|0-20dB|-5-0dB|
 
 #### Musan data set
 Speech and Noise recording
@@ -21,23 +37,73 @@ Speech and Noise recording
 }
 ```
 
-#### Generate noisy data set 
-- URL : https://github.com/chanil1218/DCUnet.pytorch
+#### Data Loading Script
+Reference URL : 
+- https://github.com/sweetcocoa/DeepComplexUNetPyTorch
+- https://github.com/jtkim-kaist/Speech-enhancement
+- https://github.com/chanil1218/DCUnet.pytorch
 
+```Python3
+# Below is how to use data loader
+# data_type = ['val', 'train', 'test', 'test2', 'test3', 'test4']
+
+import load_dataset from AudioDataset
+
+train_dataset = AudioDataset(data_type='train')
+train_data_loader = DataLoader(dataset=train_dataset, batch_size=4, collate_fn=train_dataset.collate, shuffle=True, num_workers=4)
+```
 
 ## Attention-based SE Model
-Reference : AN ATTENTION-BASED NEURAL NETWORK APPROACH FOR SINGLE CHANNEL
-SPEECH ENHANCEMENT
+Reference : Xiang Hao 'AN ATTENTION-BASED NEURAL NETWORK APPROACH FOR SINGLE CHANNEL
+SPEECH ENHANCEMENT', 2019
 URL : http://lxie.nwpu-aslp.org/papers/2019ICASSP-XiangHao.pdf
 
-## Tensorboard logging
-Reference URL : 
-- https://github.com/jtkim-kaist/Speech-enhancement
-- https://github.com/ludlows/python-pesq
-- https://github.com/vBaiCai/python-pesq
 
-Good visualization reference URL : 
-https://openreview.net/forum?id=SkeRTsAcYm
+## Train
+Arguments : 
+- batch_size : Train batch size, default = 128
+- dropout_p : Attention model's dropout rate, default = 0
+- attn_use : Use Attention model, if it is False, Train with LSTM model.  default = False
+- stacked_encoder : Use Stacked attention model, if it is False, Train with Extanded Attention model. default = False
+- hidden_size : Size of RNN. default = 0
+- num_epochs : Train epochs number. default = 100
+- learning_rate : Training Learning rate. default = 5e-4
+- ck_name : Name with save/load check point. default = 'SEckpt.pt'
 
-## Wav file Generator
-URL : 
+```bash
+CUDA_VISIBLE_DEVICES=GPUNUMBERS \
+python3 train_dcunet.py --batch_size 128 \
+                       --dropout_p 0.2\
+                       --attn_use True \
+                       --stacked_encoder True\
+                       --attn_len 5\
+                       --hidden_size 448\
+                       --num_epochs 61\
+                       --ck_name '5_448_stacked_dropout0_2.pt'
+
+# You can check other arguments from the source code.                   
+```
+
+## Test
+Arguments : 
+- batch_size : Train batch size, default = 128
+- dropout_p : Attention model's dropout rate, default = 0
+- attn_use : Use Attention model, if it is False, Train with LSTM model.  default = False
+- stacked_encoder : Use Stacked attention model, if it is False, Train with Extanded Attention model. default = False
+- hidden_size : Size of RNN. default = 0
+- ck_name : Name with load check point. default = 'SEckpt.pt'
+- test_set : Name of data_type
+
+```bash
+CUDA_VISIBLE_DEVICES=GPUNUMBERS \
+python3 train_dcunet.py --batch_size 128 \
+                       --dropout_p 0.2\
+                       --attn_use True \
+                       --stacked_encoder True\
+                       --attn_len 5\
+                       --hidden_size 448\
+                       --test_set 'test'\
+                       --ck_name '5_448_stacked_dropout0_2.pt'
+
+# You can check other arguments from the source code.                   
+```
